@@ -1,0 +1,8 @@
+name: Compass
+version: 1.0.0
+api-version: 1.16
+author: RnDB2
+main: dev.svengo.compass.CompassPlugin
+commands:
+  track:
+    description: Compass tracks spawn or specified player
