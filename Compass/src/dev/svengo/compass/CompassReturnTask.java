@@ -17,5 +17,4 @@ public class CompassReturnTask extends BukkitRunnable {
 	public void run() {
 		event.getPlayer().getInventory().addItem(new ItemStack(Material.COMPASS));
 	}
-
 }

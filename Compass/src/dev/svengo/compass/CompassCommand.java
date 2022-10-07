@@ -1,7 +1,10 @@
 package dev.svengo.compass;
 
+import static dev.svengo.compass.TextComponentUtil.getTextComponent;
+
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.function.Consumer;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -16,61 +19,67 @@ import net.md_5.bungee.api.ChatColor;
 import net.md_5.bungee.api.chat.TextComponent;
 
 public class CompassCommand implements CommandExecutor {
-	
-	public static boolean forceCommand = false;
 
-	public static HashMap<Player, Player> huntingMap = new HashMap<>();
-
-	public static ArrayList<TextComponent> hunterComponents = new ArrayList<>();
-	public static ArrayList<TextComponent> runnerComponents = new ArrayList<>();
+	public static final HashMap<Player, Player> HUNTING_MAP = new HashMap<>();
 	
-	public static TextComponent errorMessage = new ChatComponent(null, ChatColor.RED).getTextComponent();
-	public static TextComponent validArgs = new ChatComponent(null, ChatColor.GRAY).getTextComponent();
-	public static TextComponent invalidArgs = new ChatComponent(null, ChatColor.RED, true).getTextComponent();
-	public static final TextComponent HERE = new ChatComponent("<--[HERE]", ChatColor.RED).getTextComponent();
+	// null means hunter is not tracking anyone (technically not a hunter but whatever)
+	private static final Player getRunner(Player hunter) {
+		synchronized (HUNTING_MAP) {
+			return HUNTING_MAP.get(hunter);
+		}
+	}
+	
+	public static TextComponent errorMessage = getTextComponent(null, ChatColor.RED);
+	public static TextComponent validArgs = getTextComponent(null, ChatColor.GRAY);
+	public static TextComponent invalidArgs = getTextComponent(null, ChatColor.RED, true);
+	public static final TextComponent HERE = getTextComponent("<--[HERE]", ChatColor.RED);
 
 	@Override
 	public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-		hunterComponents.clear();
-		runnerComponents.clear();
+		final ArrayList<TextComponent> hunterComponents = new ArrayList<>();
+		final ArrayList<TextComponent> runnerComponents = new ArrayList<>();
+		
+		final Consumer<Player> addTrackingComponents = (runner) -> {
+			hunterComponents.add(getTextComponent("Tracking", ChatColor.GREEN));
+			hunterComponents.add(new TextComponent(": "));
+			hunterComponents.add(getTextComponent(runner.getName(), ChatColor.YELLOW));
+			hunterComponents.add(new TextComponent(", "));
+			hunterComponents.add(getTextComponent("* " + runner.getLocation().getBlockY() + " *", ChatColor.AQUA));
+		};
+		
 		boolean validCommand = true;
 		if (sender instanceof Player) {
 			Player hunter = (Player) sender;
 			if (args.length == 0) {
-				if (huntingMap.containsKey(hunter)) {
-					Player runner = huntingMap.get(hunter);
-					hunterComponents.add(new ChatComponent("Tracking", ChatColor.GREEN).getTextComponent());
-					hunterComponents.add(new TextComponent(": "));
-					hunterComponents.add(new ChatComponent(runner.getName(), ChatColor.YELLOW).getTextComponent());
-					hunterComponents.add(new TextComponent(", "));
-					hunterComponents.add(new ChatComponent("* " + runner.getLocation().getBlockY() + " *", ChatColor.AQUA).getTextComponent());
-					
+				final Player runner = getRunner(hunter);
+				if (runner != null) {
+					addTrackingComponents.accept(runner);
 				} else {
 					Location worldSpawn = hunter.getWorld().getSpawnLocation();
 					hunterComponents.add(new TextComponent("Tracking world spawn: "));
-					hunterComponents.add(new ChatComponent(worldSpawn.getBlockX() + " " + worldSpawn.getBlockY() + " " + worldSpawn.getBlockZ(), ChatColor.AQUA).getTextComponent());
+					hunterComponents.add(getTextComponent(worldSpawn.getBlockX() + " " + worldSpawn.getBlockY() + " " + worldSpawn.getBlockZ(), ChatColor.AQUA));
 				}
 			} else if (args.length == 1) {
 				if (args[0].equals("spawn")) {
-					huntingMap.remove(hunter);
+					synchronized (HUNTING_MAP) {
+						HUNTING_MAP.remove(hunter);
+					}
 					if (!hunter.getInventory().contains(Material.COMPASS)) hunter.getInventory().setItemInMainHand(new ItemStack(Material.COMPASS, 1));
 					Location worldSpawn = hunter.getWorld().getSpawnLocation();
 					hunter.setCompassTarget(worldSpawn);
 					hunterComponents.add(new TextComponent("Tracking world spawn: "));
-					hunterComponents.add(new ChatComponent(worldSpawn.getBlockX() + " " + worldSpawn.getBlockY() + " " + worldSpawn.getBlockZ(), ChatColor.AQUA).getTextComponent());
+					hunterComponents.add(getTextComponent(worldSpawn.getBlockX() + " " + worldSpawn.getBlockY() + " " + worldSpawn.getBlockZ(), ChatColor.AQUA));
 				} else if (Bukkit.getServer().getPlayer(args[0]) != null) {
 					if (!hunter.getInventory().contains(Material.COMPASS)) hunter.getInventory().setItemInMainHand(new ItemStack(Material.COMPASS, 1));
 					Player runner = Bukkit.getServer().getPlayer(args[0]);
-					huntingMap.put(hunter, runner);
-					hunterComponents.add(new ChatComponent("Tracking", ChatColor.GREEN).getTextComponent());
-					hunterComponents.add(new TextComponent(": "));
-					hunterComponents.add(new ChatComponent(runner.getName(), ChatColor.YELLOW).getTextComponent());
-					hunterComponents.add(new TextComponent(", "));
-					hunterComponents.add(new ChatComponent("* " + runner.getLocation().getBlockY() + " *", ChatColor.AQUA).getTextComponent());
+					synchronized (HUNTING_MAP) {
+						HUNTING_MAP.put(hunter, runner);
+					}
+					addTrackingComponents.accept(runner);
 					
-					runnerComponents.add(new ChatComponent("Tracked by", ChatColor.RED).getTextComponent());
+					runnerComponents.add(getTextComponent("Tracked by", ChatColor.RED));
 					runnerComponents.add(new TextComponent(": "));
-					runnerComponents.add(new ChatComponent(hunter.getName(), ChatColor.YELLOW).getTextComponent());
+					runnerComponents.add(getTextComponent(hunter.getName(), ChatColor.YELLOW));
 				} else {
 					errorMessage.setText("Invalid argument for command");
 					validArgs.setText("track ");
@@ -90,17 +99,20 @@ public class CompassCommand implements CommandExecutor {
 				} else {
 					errorMessage.setText("Invalid arguments for command");
 					validArgs.setText("track ");
-					String allArgs = args[0];
-					for (int i = 1; i < args.length; i++) {
-						allArgs += " " + args[i];
+					StringBuilder allArgs = new StringBuilder(args[0]);
+					for (int i = 1; i < args.length; ++i) {
+						allArgs.append(' ').append(args[i]);
 					}
-					invalidArgs.setText(allArgs);
+					invalidArgs.setText(allArgs.toString());
 				}
 				validCommand = false;
 			}
 			if (validCommand) {
-				hunter.spigot().sendMessage(hunterComponents.toArray(new TextComponent[hunterComponents.size()]));
-				if (runnerComponents.size() != 0) {huntingMap.get(hunter).spigot().sendMessage(runnerComponents.toArray(new TextComponent[runnerComponents.size()]));}
+				hunter.spigot().sendMessage(hunterComponents.toArray(new TextComponent[0]));
+				if (runnerComponents.size() != 0) {
+					final Player runner = getRunner(hunter);
+					runner.spigot().sendMessage(runnerComponents.toArray(new TextComponent[0]));
+				}
 			} else {
 				hunter.spigot().sendMessage(errorMessage);
 				hunter.spigot().sendMessage(new TextComponent[] {validArgs, invalidArgs, HERE});
